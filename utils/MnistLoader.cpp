@@ -3,19 +3,13 @@
 #include "MnistLoader.h"
 
 
-MnistLoader::MnistLoader(std::string image_file,
-	std::string label_file,	int num) : Dataset(0, 0)
+MnistLoader::MnistLoader(std::string file, int num) : Dataset(0, 0)
 {
-	m_size = 0;
-	load_images(image_file, num);
-	load_labels(label_file, num);
+	load(file, num);
 }
 
-MnistLoader::MnistLoader(std::string image_file,
-	std::string label_file) :
-	MnistLoader(image_file, label_file, 0)
-{
-	// empty
+MnistLoader::MnistLoader(std::string file): Dataset(0, 0) {
+	load(file, 0);
 }
 
 MnistLoader::~MnistLoader()
@@ -23,68 +17,53 @@ MnistLoader::~MnistLoader()
 	// empty
 }
 
-int MnistLoader::to_int(char* p)
+int MnistLoader::reverseInt (int i)
 {
-	return ((p[0] & 0xff) << 24) | ((p[1] & 0xff) << 16) |
-		((p[2] & 0xff) << 8) | ((p[3] & 0xff) << 0);
+	unsigned char c1, c2, c3, c4;
+    c1 = i & 255;
+    c2 = (i >> 8) & 255;
+    c3 = (i >> 16) & 255;
+    c4 = (i >> 24) & 255;
+    return ((int)c1 << 24) + ((int)c2 << 16) + ((int)c3 << 8) + c4;
+}
+
+void MnistLoader::extractGlobalInformation(std::ifstream& file) {
+	file.read((char*) (&rows), sizeof(rows)), rows = reverseInt(rows);
+	file.read((char*) (&image_rows), sizeof(image_rows)), image_rows =
+			reverseInt(image_rows);
+	file.read((char*) (&image_cols), sizeof(image_cols)), image_cols =
+			reverseInt(image_cols);
+}
+
+void MnistLoader::fillDataset(std::ifstream& file) {
+	unsigned char* buffer = new unsigned char[cols];
+	for (int i = 0; i < rows; ++i) {
+		file.read((char*) (buffer), cols);
+		std::vector<float> values(buffer, buffer + cols);
+		dataset.push_back(values);
+	}
+	file.close();
+	delete[] buffer;
+}
+
+void MnistLoader::load_images(std::ifstream& file, int num)
+{	int magic_number = 0;
+    file.read((char *)&magic_number, sizeof(magic_number));
+    magic_number = reverseInt(magic_number);
+    if(magic_number != 2051)
+    	throw std::runtime_error("Invalid MNIST image file!");
+	extractGlobalInformation(file);
+	cols = image_rows * image_cols;
+	fillDataset(file);
 }
 
 
-void MnistLoader::load_images(std::string image_file, int num)
-{	
-	std::ifstream ifs(image_file.c_str(), std::ios::in | std::ios::binary);
-
-	bool a = ifs.is_open();
-
-	char p[4];
-
-	ifs.read(p, 4);
-	int magic_number = to_int(p);
-
-	ifs.read(p, 4);
-	m_size = to_int(p);
-
-	if (num != 0 && num < m_size) m_size = num;
-
-	ifs.read(p, 4);
-	rows = to_int(p);
-
-	ifs.read(p, 4);
-	cols = to_int(p);
-
-	char* q = new char[rows * cols];
-
-	for (int i = 0; i < m_size; ++i) {
-		ifs.read(q, rows * cols);
-		std::vector<float> image(rows * cols);
-		for (int j = 0; j < rows * rows; ++j) {
-			image[j] = q[j] / 255.0;
-		}
-		dataset.push_back(image);
-	}
-	delete[] q;
-
-	ifs.close();
-}
-
-void MnistLoader::load_labels(std::string label_file, int num)
+void MnistLoader::load(std::string image_file, int num)
 {
-	std::ifstream ifs(label_file.c_str(), std::ios::in | std::ios::binary);
-	char p[4];
-
-	ifs.read(p, 4);
-	int magic_number = to_int(p);
-
-	ifs.read(p, 4);
-	int size = to_int(p);
-	// limit
-	if (num != 0 && num < m_size) size = num;
-
-	for (int i = 0; i < size; ++i) {
-		ifs.read(p, 1);
-		int label = p[0];
-		m_labels.push_back(label);
+	std::ifstream file(image_file.c_str(), std::ios::binary);
+	if(file.is_open()){
+		load_images(file, num);
+	}else{
+		throw std::runtime_error("Cannot open file `" + image_file + "`!");
 	}
-
-	ifs.close();
 }

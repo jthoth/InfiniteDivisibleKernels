@@ -1,17 +1,10 @@
 #include <iostream>
 #include "utils/NormalDistribution.h"
-
+#include "utils/MnistLoader.h"
 
 int main() {
 
-
-	NormalDistribution dataset(70000, 100, 3, 4);
-	auto moments = dataset.getMoments();
-	std::cout << '\n' << moments.mean << ' ' << moments.std;
-
-	dataset.standardNormalization();
-	moments = dataset.getMoments();
-	std::cout << '\n' << moments.mean << ' ' << moments.std;
+	MnistLoader mnist("./data/train-images-idx3-ubyte");
 
 	return 0;
 }
