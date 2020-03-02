@@ -10,6 +10,7 @@ private:
 	int reverseInt (int i);
 	void extractGlobalInformation(std::ifstream& file);
 	void fillDataset(std::ifstream& file);
+	void updateRows(int num);
 
 public:
 	MnistLoader(std::string image_file, int num);

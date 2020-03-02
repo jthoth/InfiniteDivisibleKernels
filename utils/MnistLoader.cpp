@@ -54,6 +54,7 @@ void MnistLoader::load_images(std::ifstream& file, int num)
     	throw std::runtime_error("Invalid MNIST image file!");
 	extractGlobalInformation(file);
 	cols = image_rows * image_cols;
+	updateRows(num);
 	fillDataset(file);
 }
 
@@ -63,7 +64,14 @@ void MnistLoader::load(std::string image_file, int num)
 	std::ifstream file(image_file.c_str(), std::ios::binary);
 	if(file.is_open()){
 		load_images(file, num);
+
 	}else{
 		throw std::runtime_error("Cannot open file `" + image_file + "`!");
+	}
+}
+
+void MnistLoader::updateRows(int num) {
+	if(num != 0){
+		rows = num;
 	}
 }
