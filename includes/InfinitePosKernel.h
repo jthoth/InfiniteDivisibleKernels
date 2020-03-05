@@ -11,6 +11,8 @@
 #include <vector>
 #include <cmath>
 #include "SymmetricMatrix.h"
+#include "../kernel/Estimator.cuh"
+
 
 float gaussiankenel(float distace, float sigma){
 	return exp(- distace / (2 * pow(sigma, 2)));
@@ -19,14 +21,17 @@ float gaussiankenel(float distace, float sigma){
 template <class T>
 class InfinitePosKernel {
 private:
+	bool parallel;
 	void fillGramMatrix(float (*kernel)(float, float), float sigma,
 			SymmetricMatrix& container, T& data);
 	float getSigma(T& data);
 	float computeShanon(SymmetricMatrix& gramMatrix);
 	float jointShanon(SymmetricMatrix& A, SymmetricMatrix& B);
+	float runSerial(T& X, T& Y);
+	float runParellel(T& X, T& Y);
 
 public:
-	InfinitePosKernel();
+	InfinitePosKernel(bool parallel);
 	virtual ~InfinitePosKernel();
 	float computeEntropy(T& data);
 	float computeMutualInformation(T& X, T& Y);
@@ -71,7 +76,7 @@ float InfinitePosKernel<T>::computeShanon(SymmetricMatrix& gramMatrix) {
 }
 
 template<class T>
-inline InfinitePosKernel<T>::InfinitePosKernel() {
+inline InfinitePosKernel<T>::InfinitePosKernel(bool parallel) : parallel(parallel) {
 }
 
 template<class T>
@@ -86,7 +91,6 @@ template<class T>
 inline float InfinitePosKernel<T>::jointShanon(SymmetricMatrix& A,
 		SymmetricMatrix& B) {
 	size_t size = B.getSize(); 	SymmetricMatrix C(size);
-
 	for (size_t i = 0; i < size; ++i) {
 		for (size_t j = 0; j < size; ++j) {
 			C[i][j] = A[i][j] * B[i][j] * size;
@@ -96,13 +100,28 @@ inline float InfinitePosKernel<T>::jointShanon(SymmetricMatrix& A,
 }
 
 template<class T>
-inline float InfinitePosKernel<T>::computeMutualInformation(T& X, T& Y) {
+inline float InfinitePosKernel<T>::runSerial(T& X, T& Y) {
 	X.standardNormalization(); Y.standardNormalization();
 	SymmetricMatrix A(X.rows); SymmetricMatrix B(Y.rows);
 	fillGramMatrix(gaussiankenel, getSigma(X), A, X);
 	fillGramMatrix(gaussiankenel, getSigma(Y), B, Y);
 	float joint = jointShanon(A, B);
 	return computeShanon(A) + computeShanon(B) - joint;
+}
+
+template<class T>
+inline float InfinitePosKernel<T>::runParellel(T& X, T& Y) {
+	return Estimator::computeInformationTheoryParallel(
+			X.getAsOneDimArray(), Y.getAsOneDimArray(),
+			X.rows, X.cols, Y.cols);
+}
+
+template<class T>
+inline float InfinitePosKernel<T>::computeMutualInformation(T& X, T& Y) {
+	if(parallel)
+		return runParellel(X, Y);
+	else
+		return runSerial(X, Y);
 }
 
 #endif /* INFINITEPOSKERNEL_H_ */

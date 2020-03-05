@@ -36,6 +36,16 @@ void Dataset::standardNormalization() {
 	}
 }
 
+float* Dataset::getAsOneDimArray() {
+	float* data = new float [rows * cols];
+	for (int i = 0; i < rows; ++i) {
+		for (int j = 0; j < cols; ++j) {
+			data[j + i * cols] = dataset[i][j];
+		}
+	}
+	return data;
+}
+
 void Dataset::updateMoments(float& mean, float& std) {
 	for (auto row : dataset) {
 		for (float item : row) {

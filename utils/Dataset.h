@@ -29,6 +29,7 @@ public:
 	void print();
 	moments getMoments();
 	void standardNormalization();
+	float* getAsOneDimArray();
 
 private:
 	void updateMoments(float& mean, float& std);

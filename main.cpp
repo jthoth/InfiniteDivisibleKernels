@@ -5,7 +5,6 @@
 #include "utils/StaticData.h"
 
 
-#include "kernel/Estimator.cuh"
 #include "includes/InfinitePosKernel.h"
 
 
@@ -17,12 +16,23 @@ int main() {
 
 
 
-	NormalDistribution A(200, 20, 5, 3);
-	NormalDistribution B(200, 15, 4, 3);
+	NormalDistribution A(100, 15, 5, 3);
+	NormalDistribution B(100, 13, 4, 1);
 
-	InfinitePosKernel<NormalDistribution> estimator;
-	std::cout << estimator.computeMutualInformation(A, B);
+	InfinitePosKernel<NormalDistribution> estimator(true);
+	estimator.computeMutualInformation(A, B);
 
+/*	StaticData A;
+	StaticData B;
+
+
+	InfinitePosKernel<StaticData> estimator(true);
+	estimator.computeMutualInformation(A, B);*/
+
+	auto mome = A.getMoments();
+	std::cout << "\n\n A \t Media : " << mome.mean << "\t Std : " << mome.std ;
+	mome = B.getMoments();
+	std::cout << "\n\n B \t Media : " << mome.mean << "\t Std : " << mome.std ;
 
 	return 0;
 }

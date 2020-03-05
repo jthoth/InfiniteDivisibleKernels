@@ -113,11 +113,8 @@ void SymmetricMatrix::print(SymmetricMatrix& instance) {
 
 float* SymmetricMatrix::diagonal(SymmetricMatrix& instance) {
 	float* diagonal = new float[size];
-	//std::cout << '\n';
-
 	for (size_t i = 0; i < size; ++i) {
 		diagonal[i] = instance[i][i];
-		//std::cout << instance[i][i] << '\t';
 	}
 	return diagonal;
 }
