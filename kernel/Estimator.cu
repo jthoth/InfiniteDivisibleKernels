@@ -1,85 +1,148 @@
 #include "Estimator.cuh"
+#include "../utils/Dataset.h"
 #include <iostream>
 #include <math.h>
 
+__global__ void partialMoments(float *x, float* moments, int n){
+	extern __shared__ float sdata[];
+	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x * 2,
+				 total = blockDim.x  * gridDim.x,
+				 thidx = threadIdx.x;
 
-__global__ void computeStd(float* data, float* moments, int n, int pad){
-	extern __shared__ float std[]; float mean = moments[pad - 1];
-	unsigned int threadIndex = threadIdx.x;
-	unsigned int index = threadIdx.x + blockIdx.x * (blockDim.x * 2);
-	std[threadIndex] = 0;
-	if(index < n)
-		std[threadIndex] = powf(data[index], 2) + powf(data[index + blockDim.x], 2);
-	__syncthreads();
+    if(index < n)
+    	sdata[thidx] = x[index] + x[index + blockDim.x];
+    else
+    	sdata[thidx] = (powf(x[index - total], 2) +  powf(x[index + blockDim.x - total], 2));
+
+    __syncthreads();
 	for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-		if (threadIndex < s) std[threadIndex] += std[threadIndex + s];
-		__syncthreads();
+		if(thidx < s){
+			sdata[thidx] += sdata[thidx + s];
+			__syncthreads();
+		}
 	}
-	if (index == 0) moments[index + pad]  =  sqrtf(std[0]/n - powf(mean, 2));
+	if(thidx == 0)
+		moments[blockIdx.x] = sdata[thidx];
 }
 
 
-__global__ void computeMean(float* data, float* moments, int n, int pad){
-	extern __shared__ float mean[];
-	unsigned int threadIndex = threadIdx.x;
-	unsigned int index = threadIdx.x + blockIdx.x * (blockDim.x * 2);
-	mean[threadIndex] = 0;
-	if(index < n)
-		mean[threadIndex] =  data[index] +  data[index + blockDim.x];
-	__syncthreads();
-	for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
-		if (threadIndex < s) mean[threadIndex] += mean[threadIndex + s];
-		__syncthreads();
+__global__ void composeMoments(float * moments, int block, int n){
+	float mean=0, var=0; int stride = block/2;
+	for (int i = 0; i < stride; ++i) {
+		mean += moments[i];
+		var += moments[i + stride];
 	}
-	if (index == 0) moments[index + pad] = mean[0]/n;
+	moments[0] = mean/n; moments[stride] = sqrtf(var/n - powf(mean/n, 2));
+}
+
+__global__ void standardNormalization(float *X, float *moments, int stride){
+	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
+	X[index] = (X[index] - moments[0])/moments[stride];
+}
+
+
+__device__ float gaussiankenelParallel(float distace, float sigma){
+	return exp(- distace / (2 * pow(sigma, 2)));
+}
+
+
+__global__ void fillGramMatrix(float *X, float *GM, float sigma){
+
+	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
+
+
+
+
+
+	GM[index] = sigma;
+
 }
 
 
 namespace Estimator {
 
+	unsigned int computeBlocks(int threads, int n){
+		unsigned int blocks = (n + threads - 1)/threads;
+		blocks = (blocks % 2 == 0) ? blocks : blocks + 1;
+		return blocks;
+	}
+
+	float getSigma(int rows, int cols) {
+		float penalizer = -1.0/(4 + cols);
+		float scottFactor = pow(rows, penalizer);
+		return sqrt(2 * cols) * scottFactor;
+	}
+
+
 	float computeInformationTheoryParallel(float *X, float *Y,
-			int rows, int xcols, int ycols){
+			int rows, int xcols, int ycols){ checkAvailableDevices();
 
-		availableDevices(); size_t fsize = sizeof(float);
+		const unsigned int threads = 1024; size_t sfloat = sizeof(float);
+		unsigned int blocks = computeBlocks(threads, rows * xcols);
 
-		float *Xdev, *moments, momentsHost[4];
-		cudaMalloc((void **) &moments, 4 * fsize);
-	    cudaMalloc((void **) &Xdev, rows * xcols * fsize);
+		// Normalizing X
 
-	    cudaMemcpy(Xdev, X, rows * xcols * fsize, cudaMemcpyHostToDevice);
+		size_t sizex = sfloat * rows * xcols; float *Xdev, *momentsx;
 
-		const unsigned int threads = 1024;
-		unsigned int block = (rows * xcols  + threads - 1)/threads;
-		computeMean<<<block, threads, threads * fsize>>>(Xdev, moments, rows * xcols, 0);
-		computeStd<<<block, threads, threads * fsize>>>(Xdev, moments, rows * xcols, 1);
+		cudaMalloc((void **) &Xdev, sizex);
+		cudaMalloc((void **) &momentsx, sfloat * blocks);
 
-		float *Ydev;
-	    cudaMalloc((void **) &Ydev, rows * ycols * fsize);
-	    cudaMemcpy(Ydev, Y, rows * ycols * fsize, cudaMemcpyHostToDevice);
+		cudaMemcpy(Xdev, X, sizex, cudaMemcpyHostToDevice);
 
-	    block = (rows * ycols  + threads - 1)/threads;
-		computeMean<<<block, threads, threads * fsize>>>(Ydev, moments, rows * ycols, 2);
-		computeStd<<<block, threads, threads * fsize>>>(Ydev, moments, rows * ycols, 3);
+		/*partialMoments<<<blocks, threads, sfloat * threads>>>(
+				Xdev, momentsx, rows * xcols);
 
-	    cudaDeviceSynchronize();
+		composeMoments<<<1, 1>>>(momentsx, blocks, rows * xcols);
+
+		standardNormalization<<<blocks, threads>>>(
+				Xdev, momentsx, blocks / 2);
+
+		// Normalizing Y
+
+		size_t sizey = sfloat * rows * ycols; float *Ydev, *momentsy;
+		blocks = computeBlocks(threads, rows * ycols);
+
+		cudaMalloc((void **) &Ydev, sizey);
+		cudaMalloc((void **) &momentsy, sfloat * blocks);
+
+		cudaMemcpy(Ydev, Y, sizey, cudaMemcpyHostToDevice);
+
+		partialMoments<<<blocks, threads, sfloat * threads>>>(
+				Ydev, momentsy, rows * ycols);
+
+		composeMoments<<<1, 1>>>(momentsy, blocks, rows * ycols);
+
+		standardNormalization<<<blocks, threads>>>(
+				Ydev, momentsy, blocks / 2);*/
 
 
-	    cudaMemcpy(momentsHost, moments, 4 * fsize, cudaMemcpyDeviceToHost);
+		/* Kernel Computation */
 
-	    std::cout << "\n\n Blocks: "  << block << '\t' << threads  << '\n' << '\n';
+		float * gramX, * gramY; size_t sgram = sfloat * pow(rows, 2);
 
-	    for (int i = 0; i < 4; ++i) {
-			std::cout <<  momentsHost[i] << '\t';
-		}
+		cudaMalloc((void **) &gramX, sgram);
+		cudaMalloc((void **) &gramY, sgram);
 
-	    cudaFree(Xdev); /*cudaFree(Ydev);*/ cudaFree(moments);
+		blocks = computeBlocks(threads, pow(rows, 2));
 
+		dim3 threadsGram(threads, threads, 1);
+		dim3 BlockGram(blocks, blocks, 1);
+
+		fillGramMatrix<<<BlockGram, threadsGram>>>(
+				Xdev, gramX, getSigma(rows, xcols));
+
+
+
+
+		cudaFree(Xdev); cudaFree(momentsx);
+		cudaFree(gramX); cudaFree(gramY);
+		//cudaFree(Ydev); cudaFree(momentsy);
 
 
 		return 1.0;
 	}
 
-	void availableDevices(){
+	void checkAvailableDevices(){
 		int deviceCount; cudaGetDeviceCount(&deviceCount);
 		if(deviceCount == 0){
 			fprintf(stderr, "Error: No devices supporting CUDA.\n");

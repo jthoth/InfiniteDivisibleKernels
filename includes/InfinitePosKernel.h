@@ -43,7 +43,8 @@ inline void InfinitePosKernel<T>::fillGramMatrix(float (*kernel)(float, float),
 		float sigma, SymmetricMatrix& container, T& data) {
 	float accumulator, N = data.rows, cols = data.cols;
 	for (int row = 0; row < N; ++row) {
-		for(int dist = 0; dist < N; ++dist){ accumulator = 0;
+		for(int dist = 0; dist < N; ++dist){
+			accumulator = 0;
 			for (int col = 0; col < cols; ++col) {
 				accumulator += pow(data(row, col) - data(dist, col), 2);
 			}

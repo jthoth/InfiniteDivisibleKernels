@@ -8,6 +8,6 @@ namespace Estimator {
 	float computeInformationTheoryParallel(float *X, float *Y,
 			int rows, int xcols, int ycols);
 
-	void availableDevices();
-
+	void checkAvailableDevices();
+	unsigned int computeBlocks(int threads, int n);
 }
