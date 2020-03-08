@@ -19,7 +19,23 @@ StaticData::StaticData(): Dataset(6, 5) {
 
 }
 
+
+
 StaticData::~StaticData() {
 
 }
 
+void StaticData::fillWith(float value, int _rows, int _cols) {
+	rows = _rows; cols = _cols;
+	std::vector<std::vector<float>> data;
+
+	for (int i = 0; i < rows; ++i) {
+		std::vector<float> local;
+		for (int var = 0; var < cols; ++var) {
+			local.push_back(value + i);
+		}
+		data.push_back(local);
+	}
+
+	dataset = data;
+}

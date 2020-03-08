@@ -14,6 +14,7 @@ class StaticData: public Dataset {
 public:
 	StaticData();
 	virtual ~StaticData();
+	void fillWith(float value, int rows, int cols);
 };
 
 #endif /* STATICDATA_H_ */

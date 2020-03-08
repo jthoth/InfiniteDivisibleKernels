@@ -15,6 +15,7 @@ __global__ void partialMoments(float *x, float* moments, int n){
     	sdata[thidx] = (powf(x[index - total], 2) +  powf(x[index + blockDim.x - total], 2));
 
     __syncthreads();
+
 	for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
 		if(thidx < s){
 			sdata[thidx] += sdata[thidx + s];
@@ -40,21 +41,40 @@ __global__ void standardNormalization(float *X, float *moments, int stride){
 	X[index] = (X[index] - moments[0])/moments[stride];
 }
 
+__global__ void fillGramMatrix(float* in, float* out,
+		float sigma, int n, int m){
 
-__device__ float gaussiankenelParallel(float distace, float sigma){
-	return exp(- distace / (2 * pow(sigma, 2)));
+	__shared__ float Ys[16][16];
+	__shared__ float Xs[16][16];
+
+	int bx = blockIdx.x, by = blockIdx.y;
+	int tx = threadIdx.x, ty = threadIdx.y;
+
+	int yBegin = by * 16 * m;
+	int xBegin = bx * 16 * m;
+
+	int yEnd = yBegin + m - 1, y, x, k, o;
+
+	float tmp, s = 0;
+
+	for (y = yBegin, x = xBegin; y <= yEnd;	y += 16, x += 16){
+		Ys[ty][tx] = in[y + ty * m + tx];
+		Xs[tx][ty] = in[x + ty * m + tx];
+
+		__syncthreads();
+
+		for (k = 0; k<16; k++){
+			tmp = Ys[ty][k] - Xs[k][tx];
+			s += tmp * tmp;
+		}
+		__syncthreads();
+	}
+	o = by * 16 * n + ty * n + bx * 16 + tx;
+
+	out[o] = exp(- s / (2 * pow(sigma, 2)));
 }
 
-
-__global__ void fillGramMatrix(float *X, float *GM, float sigma){
-
-	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
-
-
-
-
-
-	GM[index] = sigma;
+__global__ void hadamardProduct(float *X, float *Y, float *XY){
 
 }
 
@@ -80,7 +100,7 @@ namespace Estimator {
 		const unsigned int threads = 1024; size_t sfloat = sizeof(float);
 		unsigned int blocks = computeBlocks(threads, rows * xcols);
 
-		// Normalizing X
+		//////////////////////////// Normalizing X ////////////////////////////
 
 		size_t sizex = sfloat * rows * xcols; float *Xdev, *momentsx;
 
@@ -89,7 +109,7 @@ namespace Estimator {
 
 		cudaMemcpy(Xdev, X, sizex, cudaMemcpyHostToDevice);
 
-		/*partialMoments<<<blocks, threads, sfloat * threads>>>(
+		partialMoments<<<blocks, threads, sfloat * threads>>>(
 				Xdev, momentsx, rows * xcols);
 
 		composeMoments<<<1, 1>>>(momentsx, blocks, rows * xcols);
@@ -97,7 +117,7 @@ namespace Estimator {
 		standardNormalization<<<blocks, threads>>>(
 				Xdev, momentsx, blocks / 2);
 
-		// Normalizing Y
+		//////////////////////////// Normalizing Y ////////////////////////////
 
 		size_t sizey = sfloat * rows * ycols; float *Ydev, *momentsy;
 		blocks = computeBlocks(threads, rows * ycols);
@@ -113,10 +133,9 @@ namespace Estimator {
 		composeMoments<<<1, 1>>>(momentsy, blocks, rows * ycols);
 
 		standardNormalization<<<blocks, threads>>>(
-				Ydev, momentsy, blocks / 2);*/
+				Ydev, momentsy, blocks / 2);
 
-
-		/* Kernel Computation */
+		//////////////////////////// Compute Gram Matrix ///////////////////
 
 		float * gramX, * gramY; size_t sgram = sfloat * pow(rows, 2);
 
@@ -125,21 +144,45 @@ namespace Estimator {
 
 		blocks = computeBlocks(threads, pow(rows, 2));
 
-		dim3 threadsGram(threads, threads, 1);
-		dim3 BlockGram(blocks, blocks, 1);
+		dim3 block(16, 16);
+		dim3 grid(ceil(rows/16), ceil(rows/16));
 
-		fillGramMatrix<<<BlockGram, threadsGram>>>(
-				Xdev, gramX, getSigma(rows, xcols));
+		fillGramMatrix<<<grid, block >>>(Xdev, gramX,
+				getSigma(rows, xcols), rows, xcols);
 
+		fillGramMatrix<<<grid, block >>>(Ydev, gramY,
+				getSigma(rows, ycols), rows, ycols);
+
+
+		//////////////////////////// Compute Eigen Values & Entropy///////////////////
+
+
+
+
+
+		//////////////////////////// Compute Joint Entropy ///////////////////
+
+
+
+
+
+
+		//////////////////////////// Compute Mutual Information ///////////////////
+
+
+
+	    cudaDeviceSynchronize();
+
+	    float mutualInformation;
 
 
 
 		cudaFree(Xdev); cudaFree(momentsx);
 		cudaFree(gramX); cudaFree(gramY);
-		//cudaFree(Ydev); cudaFree(momentsy);
+		cudaFree(Ydev); cudaFree(momentsy);
 
 
-		return 1.0;
+		return mutualInformation;
 	}
 
 	void checkAvailableDevices(){
