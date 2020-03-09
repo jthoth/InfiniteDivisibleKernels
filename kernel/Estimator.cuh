@@ -10,4 +10,12 @@ namespace Estimator {
 
 	void checkAvailableDevices();
 	unsigned int computeBlocks(int threads, int n);
+
+	class RotationArgs{
+	public:
+	  float value = 1e-12, _cos, _sin;
+	  unsigned int p, q, n;
+
+	};
+
 }

@@ -26,7 +26,6 @@ __global__ void partialMoments(float *x, float* moments, int n){
 		moments[blockIdx.x] = sdata[thidx];
 }
 
-
 __global__ void composeMoments(float * moments, int block, int n){
 	float mean=0, var=0; int stride = block/2;
 	for (int i = 0; i < stride; ++i) {
@@ -74,8 +73,94 @@ __global__ void fillGramMatrix(float* in, float* out,
 	out[o] = exp(- s / (2 * pow(sigma, 2)));
 }
 
+__global__ void maxValueAndArgsPerBlock(float* mat, float* target, int* idx_target) {
+    __shared__ float max_vals[32];
+    __shared__ unsigned int max_idxs[32];
+    unsigned int width = gridDim.x;
+
+    float cur_max = 1e-9;
+    unsigned int cur_idx = 0;
+    float val = 0;
+
+    for (unsigned int i = threadIdx.x; i < blockIdx.x; i += 32) {
+        val = abs(mat[blockIdx.x * width + i]);
+        if (val > cur_max && i != blockIdx.x) {
+            cur_max = abs(val);
+            cur_idx = i;
+        }
+    }
+    max_vals[threadIdx.x] = cur_max;
+    max_idxs[threadIdx.x] = cur_idx;
+
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        cur_max = 1e-9; cur_idx = 0;
+        for (unsigned int i = 0; i < 32; i++)
+            if (max_vals[i] > cur_max) {
+                cur_max = max_vals[i];
+                cur_idx = max_idxs[i];
+            }
+        target[blockIdx.x] = cur_max;
+        idx_target[blockIdx.x] = cur_idx;
+    }
+}
+
 __global__ void hadamardProduct(float *X, float *Y, float *XY){
 
+}
+
+__global__ void minmax_row_kernel(float* mat, float* target,
+                                  int* idx_target) {
+    __shared__ float max_vals[32];
+    __shared__ unsigned int max_idxs[32];
+    unsigned int width = gridDim.x;
+
+    float cur_max = 1e-9;
+    unsigned int cur_idx = 0;
+    float val = 0;
+
+    for (unsigned int i = threadIdx.x; i < blockIdx.x; i += 32) {
+        val = abs(mat[blockIdx.x * width + i]);
+        if (val > cur_max && i != blockIdx.x) {
+            cur_max = abs(val);
+            cur_idx = i;
+        }
+    }
+    max_vals[threadIdx.x] = cur_max;
+    max_idxs[threadIdx.x] = cur_idx;
+
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        cur_max = 1e-9; cur_idx = 0;
+        for (unsigned int i = 0; i < 32; i++)
+            if (max_vals[i] > cur_max) {
+                cur_max = max_vals[i];
+                cur_idx = max_idxs[i];
+            }
+        target[blockIdx.x] = cur_max;
+        idx_target[blockIdx.x] = cur_idx;
+    }
+}
+
+__global__ void computeRotationArgs(float* GM, float* maxValues, int * maxArgs,
+  RotationArgs* rArgs, unsigned int n){
+
+    for (size_t i = 0; i < n; i++) {
+      float moment = maxValues[i];
+      if(moment > rArgs->value){
+        rArgs->value = moment; rArgs->p = i;
+        rArgs->q = maxArgs[i];
+      }
+    }
+
+    float phi = (GM[rArgs->p + rArgs->p * n] -
+                 GM[rArgs->p + rArgs->p * n])/(2*rArgs->value);
+
+    float t = phi == 0 ? 1 : (1 / (phi + (phi > 0 ? 1 : -1) * sqrt(phi * phi + 1)));
+  	rArgs->_cos = 1/sqrt(1 + t * t);
+    rArgs->_sin = t/sqrt(1 + t * t);
 }
 
 
