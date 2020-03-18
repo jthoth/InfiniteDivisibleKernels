@@ -3,6 +3,14 @@
 #include <iostream>
 #include <math.h>
 
+
+class RotationArgs{
+	public:
+	  float value = 1e-9, _cos, _sin;
+	  unsigned int p, q, n;
+
+	};
+
 __global__ void partialMoments(float *x, float* moments, int n){
 	extern __shared__ float sdata[];
 	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x * 2,
@@ -70,61 +78,24 @@ __global__ void fillGramMatrix(float* in, float* out,
 	}
 	o = by * 16 * n + ty * n + bx * 16 + tx;
 
-	out[o] = exp(- s / (2 * pow(sigma, 2)));
+	out[o] = exp(- s / (2 * pow(sigma, 2)))/n;
 }
 
 __global__ void maxValueAndArgsPerBlock(float* mat, float* target, int* idx_target) {
-    __shared__ float max_vals[32];
+
+	__shared__ float max_vals[32];
     __shared__ unsigned int max_idxs[32];
+
     unsigned int width = gridDim.x;
 
-    float cur_max = 1e-9;
+    float cur_max = 1e-16;
     unsigned int cur_idx = 0;
     float val = 0;
 
     for (unsigned int i = threadIdx.x; i < blockIdx.x; i += 32) {
         val = abs(mat[blockIdx.x * width + i]);
-        if (val > cur_max && i != blockIdx.x) {
-            cur_max = abs(val);
-            cur_idx = i;
-        }
-    }
-    max_vals[threadIdx.x] = cur_max;
-    max_idxs[threadIdx.x] = cur_idx;
-
-    __syncthreads();
-
-    if (threadIdx.x == 0) {
-        cur_max = 1e-9; cur_idx = 0;
-        for (unsigned int i = 0; i < 32; i++)
-            if (max_vals[i] > cur_max) {
-                cur_max = max_vals[i];
-                cur_idx = max_idxs[i];
-            }
-        target[blockIdx.x] = cur_max;
-        idx_target[blockIdx.x] = cur_idx;
-    }
-}
-
-__global__ void hadamardProduct(float *X, float *Y, float *XY){
-
-}
-
-__global__ void minmax_row_kernel(float* mat, float* target,
-                                  int* idx_target) {
-    __shared__ float max_vals[32];
-    __shared__ unsigned int max_idxs[32];
-    unsigned int width = gridDim.x;
-
-    float cur_max = 1e-9;
-    unsigned int cur_idx = 0;
-    float val = 0;
-
-    for (unsigned int i = threadIdx.x; i < blockIdx.x; i += 32) {
-        val = abs(mat[blockIdx.x * width + i]);
-        if (val > cur_max && i != blockIdx.x) {
-            cur_max = abs(val);
-            cur_idx = i;
+        if (val > cur_max) {
+            cur_max = val; cur_idx = i;
         }
     }
     max_vals[threadIdx.x] = cur_max;
@@ -146,23 +117,67 @@ __global__ void minmax_row_kernel(float* mat, float* target,
 
 __global__ void computeRotationArgs(float* GM, float* maxValues, int * maxArgs,
   RotationArgs* rArgs, unsigned int n){
-
+	rArgs->value = 1e-12;
     for (size_t i = 0; i < n; i++) {
-      float moment = maxValues[i];
+      float moment = fabsf(maxValues[i]);
       if(moment > rArgs->value){
-        rArgs->value = moment; rArgs->p = i;
-        rArgs->q = maxArgs[i];
+        rArgs->value = moment;
+        rArgs->p = i; rArgs->q = maxArgs[i];
       }
     }
 
-    float phi = (GM[rArgs->p + rArgs->p * n] -
-                 GM[rArgs->p + rArgs->p * n])/(2*rArgs->value);
-
+    float phi = (GM[rArgs->q + rArgs->q * n]  - GM[rArgs->p + rArgs->p * n]);
+    phi /= (2 * GM[rArgs->q + rArgs->p * n]);
     float t = phi == 0 ? 1 : (1 / (phi + (phi > 0 ? 1 : -1) * sqrt(phi * phi + 1)));
-  	rArgs->_cos = 1/sqrt(1 + t * t);
-    rArgs->_sin = t/sqrt(1 + t * t);
+  	rArgs->_cos = 1/sqrtf(1 + t * t); rArgs->_sin = t/sqrtf(1 + t * t);
 }
 
+__global__ void jacobiRotationEigen(float *GM, RotationArgs *args, unsigned int col){
+
+	__shared__ float s[2][128];
+
+	unsigned int local = threadIdx.x;
+	unsigned int index = local + blockIdx.x * blockDim.x;
+
+	float _cos = args->_cos, _sin = args->_sin;
+
+	int ip = args->p * col + index, iq = args->q * col + index;
+
+	s[0][local] = GM[ip]; s[1][local] = GM[iq];
+
+	__syncthreads();
+
+	GM[ip] = s[0][local] * _cos - s[1][local] * _sin;
+	GM[iq] = s[0][local] * _sin + s[1][local] * _cos;
+
+	__syncthreads();
+
+	ip = index * col + args->p; iq = index * col + args->q;
+
+	s[0][local] = GM[ip]; s[1][local] = GM[iq];
+
+	__syncthreads();
+
+	GM[ip] = s[0][local] * _cos - s[1][local] * _sin;
+	GM[iq] = s[0][local] * _sin + s[1][local] * _cos;
+
+}
+
+__global__ void computeEntropy(float* GM, unsigned int rows, float * entropy){
+	entropy[0] = 0;
+	for (int i = 0; i < rows; ++i) {
+		float value = GM[i + i * rows];
+		entropy[0] += value * logf(value);
+	}
+
+	entropy[0] = -entropy[0];
+}
+
+
+__global__ void hadamardProduct(float *GMX, float *GMY, float *GMXY){
+	unsigned int index = threadIdx.x + blockIdx.x * blockDim.x;
+	GMXY[index] = GMX[index] * GMY[index];
+}
 
 namespace Estimator {
 
@@ -199,8 +214,8 @@ namespace Estimator {
 
 		composeMoments<<<1, 1>>>(momentsx, blocks, rows * xcols);
 
-		standardNormalization<<<blocks, threads>>>(
-				Xdev, momentsx, blocks / 2);
+		standardNormalization<<<blocks, threads>>>(Xdev, momentsx, blocks / 2);
+
 
 		//////////////////////////// Normalizing Y ////////////////////////////
 
@@ -222,10 +237,11 @@ namespace Estimator {
 
 		//////////////////////////// Compute Gram Matrix ///////////////////
 
-		float * gramX, * gramY; size_t sgram = sfloat * pow(rows, 2);
+		float * gramX, * gramY, * gramXY; size_t sgram = sfloat * pow(rows, 2);
 
 		cudaMalloc((void **) &gramX, sgram);
 		cudaMalloc((void **) &gramY, sgram);
+		cudaMalloc((void **) &gramXY, sgram);
 
 		blocks = computeBlocks(threads, pow(rows, 2));
 
@@ -238,36 +254,83 @@ namespace Estimator {
 		fillGramMatrix<<<grid, block >>>(Ydev, gramY,
 				getSigma(rows, ycols), rows, ycols);
 
-
-		//////////////////////////// Compute Eigen Values & Entropy///////////////////
-
-
+		blocks = computeBlocks(threads, rows * rows);
+		hadamardProduct<<<blocks, threads>>>(gramX, gramY, gramXY);
 
 
+		//////////////////////////// Compute Eigen Values & Entropy of X///////////////////
 
-		//////////////////////////// Compute Joint Entropy ///////////////////
+		const unsigned int MAXITER = 3 * 1e3;
+
+		float* rowValues; int* indexes;  RotationArgs* args;
+		float *entropyX;
+
+		cudaMalloc((void **) &args, sizeof(RotationArgs));
+		cudaMalloc((void **) &rowValues, rows * sfloat);
+		cudaMalloc((void **) &indexes, rows * sizeof(int));
+		cudaMalloc((void **) &entropyX, sfloat);
+
+		blocks = computeBlocks(128, rows);
 
 
+		for (int i = 0; i < MAXITER; ++i) {
+			maxValueAndArgsPerBlock<<<rows, 32>>>(gramX, rowValues, indexes);
+		    computeRotationArgs<<<1, 1>>>(gramX, rowValues, indexes, args, rows);
+			jacobiRotationEigen<<<blocks, 128>>>(gramX, args, rows);
+		}
+
+		computeEntropy<<<1, 1>>>(gramX, rows, entropyX);
 
 
+		//////////////////////////// Compute Eigen Values & Entropy of Y///////////////////
+
+		float *entropyY;
+		cudaMalloc((void **) &entropyY, sfloat);
+
+		for (int i = 0; i < MAXITER; ++i) {
+			maxValueAndArgsPerBlock<<<rows, 32>>>(gramY, rowValues, indexes);
+		    computeRotationArgs<<<1, 1>>>(gramY, rowValues, indexes, args, rows);
+			jacobiRotationEigen<<<blocks, 128>>>(gramY, args, rows);
+		}
+
+		computeEntropy<<<1, 1>>>(gramY, rows, entropyY);
 
 
-		//////////////////////////// Compute Mutual Information ///////////////////
+		//////////////////////////// Compute Eigen Values & Entropy of XY///////////////////
 
 
+		float *entropyXY;
+		cudaMalloc((void **) &entropyXY, sfloat);
+
+		for (int i = 0; i < MAXITER; ++i) {
+			maxValueAndArgsPerBlock<<<rows, 32>>>(gramXY, rowValues, indexes);
+		    computeRotationArgs<<<1, 1>>>(gramXY, rowValues, indexes, args, rows);
+			jacobiRotationEigen<<<blocks, 128>>>(gramXY, args, rows);
+		}
+
+		computeEntropy<<<1, 1>>>(gramXY, rows, entropyXY);
 
 	    cudaDeviceSynchronize();
 
-	    float mutualInformation;
+	    float hx, hy, hxy;
 
 
+	    cudaMemcpy(&hx, entropyX, sfloat, cudaMemcpyDeviceToHost);
+	    cudaMemcpy(&hy, entropyY, sfloat, cudaMemcpyDeviceToHost);
+	    cudaMemcpy(&hxy, entropyXY, sfloat, cudaMemcpyDeviceToHost);
 
+
+	    cudaFree(rowValues); cudaFree(indexes);
 		cudaFree(Xdev); cudaFree(momentsx);
-		cudaFree(gramX); cudaFree(gramY);
+		cudaFree(gramX); cudaFree(gramY); cudaFree(gramXY);
+
+		cudaFree(entropyX); cudaFree(entropyY); cudaFree(entropyXY);
+
 		cudaFree(Ydev); cudaFree(momentsy);
 
+		std::cout << hxy << '\n';
 
-		return mutualInformation;
+		return hx + hy - hxy;
 	}
 
 	void checkAvailableDevices(){

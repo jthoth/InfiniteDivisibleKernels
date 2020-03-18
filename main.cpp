@@ -10,35 +10,12 @@
 
 int main() {
 
-	/*MnistLoader mnistA("./data/train-images-idx3-ubyte", 1308);
-	MnistLoader mnistB("./data/train-images-idx3-ubyte", 1308);*/
+	MnistLoader mnistA("./data/train-images-idx3-ubyte", 256);
+	MnistLoader mnistB("./data/train-images-idx3-ubyte", 256);
 
-	/*InfinitePosKernel<MnistLoader> estimator(true);
-	estimator.computeMutualInformation(mnistA, mnistA);*/
+	InfinitePosKernel<MnistLoader> estimator(true);
 
-
-    std::cout << std::fixed;
-    std::cout << std::setprecision(3);
-
-	NormalDistribution A(32, 32, 5, 3);
-	NormalDistribution B(32, 32, 4, 1);
-
-	InfinitePosKernel<NormalDistribution> estimator(true);
-	estimator.computeMutualInformation(A, B);
-
-	/*StaticData A;
-	StaticData B;
-
-	A.fillWith(1.0, 32, 32);
-
-
-	InfinitePosKernel<StaticData> estimator(true);
-	estimator.computeMutualInformation(A, B);*/
-
-	auto mome = A.getMoments();
-	std::cout << "\n\n A \t Media : " << mome.mean << "\t Std : " << mome.std ;
-	mome = A.getMoments();
-	std::cout << "\n\n B \t Media : " << mome.mean << "\t Std : " << mome.std ;
+	std::cout << estimator.computeMutualInformation(mnistA, mnistA);
 
 	return 0;
 }

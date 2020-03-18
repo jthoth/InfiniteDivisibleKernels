@@ -36,10 +36,8 @@ float* SymmetricMatrix::computeEigenValues(float epsilon) {
 	SymmetricMatrix* A = this;
 
 	while(true){
-
 		maximunArgs _max = this->computeMaxValueLower(*A);
 		rotationArgs rot = computeRotationValues(*A, _max);
-
 		if(_max.pq < epsilon)
 			break;
 
@@ -47,7 +45,6 @@ float* SymmetricMatrix::computeEigenValues(float epsilon) {
 		rotate(*A, C, _max, rot);
 
 		update(*A, C, _max, rot);
-
 		delete [] C;
 	}
 	return A->diagonal(*A);
@@ -69,13 +66,12 @@ maximunArgs SymmetricMatrix::computeMaxValueLower(SymmetricMatrix& instance) {
 
 rotationArgs SymmetricMatrix::computeRotationValues(SymmetricMatrix& instance,
 		maximunArgs& maxArgs) {
-
 	float phi = (instance[maxArgs.q][maxArgs.q] - instance[maxArgs.p][maxArgs.p]);
 	phi /= 2 * instance[maxArgs.p][maxArgs.q];
 	float t = phi == 0 ? 1 : (1 / (phi + (phi > 0 ? 1 : -1) * sqrt(phi * phi + 1)));
 	float cosine = 1 / sqrt(1 + t * t), sine = t / sqrt(1 + t * t);
-	return {cosine, sine};
 
+	return {cosine, sine};
 }
 
 void SymmetricMatrix::rotate(SymmetricMatrix& A, float*& C,
